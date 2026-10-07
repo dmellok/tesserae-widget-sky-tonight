@@ -187,3 +187,43 @@ def test_a_fixed_hour_in_the_morning_means_the_coming_evening():
     assert server._when("21", morning).day == 15
     small_hours = datetime(2026, 8, 15, 2, 0).astimezone()
     assert server._when("21", small_hours).day == 14
+
+
+# ----- location time --------------------------------------------------
+
+
+def test_the_clock_is_read_in_the_locations_zone():
+    """A server in Berlin drawing Melbourne's sky reads "now" and "9 pm
+    tonight" on Melbourne's clock when the location carries its zone."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    loc = {**MERNDA, "location": {"name": "Mernda", "timezone": "Australia/Melbourne"}}
+    out = server.fetch({**loc, "when": "now", "mag": "4.0"}, {}, ctx={})
+    mel = datetime.now(ZoneInfo("Australia/Melbourne"))
+    assert out["time"] == mel.strftime("%H:%M")
+    assert out["date"] == mel.strftime("%a %d %b")
+    nine = server.fetch({**loc, "when": "21", "mag": "4.0"}, {}, ctx={})
+    assert nine["time"] == "21:00"
+    assert server._location_tz({"timezone": "Europe/Berlin"}, 145.0) == ZoneInfo("Europe/Berlin")
+
+
+def test_without_a_zone_a_far_location_uses_its_solar_offset(monkeypatch):
+    """No zone on the location and a server many hours away: fall back to
+    the whole-hour offset for the longitude, not the server's clock."""
+    from datetime import timedelta, timezone
+
+    monkeypatch.setenv("TZ", "Europe/Berlin")
+    import time as _time
+
+    if hasattr(_time, "tzset"):
+        _time.tzset()
+    try:
+        tz = server._location_tz({}, 145.095)
+        assert tz == timezone(timedelta(hours=10))
+        # Near the server's own longitude, its zone (DST and all) wins.
+        assert server._location_tz({}, 13.4) != timezone(timedelta(hours=1))
+    finally:
+        monkeypatch.undo()
+        if hasattr(_time, "tzset"):
+            _time.tzset()

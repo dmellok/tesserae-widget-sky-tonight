@@ -27,8 +27,9 @@ import math
 import os
 import struct
 import zlib
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, tzinfo
 from typing import Any
+from zoneinfo import ZoneInfo
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -158,6 +159,42 @@ def _twilight(sun_alt: float) -> str:
     return "Night"
 
 
+def _tz_from_name(name: Any) -> tzinfo | None:
+    if not isinstance(name, str) or not name.strip():
+        return None
+    try:
+        return ZoneInfo(name.strip())
+    except (ValueError, KeyError, OSError):
+        return None
+
+
+def _location_tz(options: dict[str, Any], lon: float) -> tzinfo:
+    """The zone whose wall clock "now" and "9 pm tonight" are read in.
+
+    Newer servers carry the geocoder's IANA zone on the location option
+    (as ``timezone`` on the location dict, or promoted to the top level).
+    Older saved locations and pasted coordinates have none, and with no
+    network call there is no way to look one up, so the server's own zone
+    is used when it is plausible for the longitude (within a couple of
+    hours of the solar offset, which covers the usual case of a server
+    drawing its own sky, DST included). A location far from the server's
+    zone falls back to the whole-hour solar offset for its longitude, which
+    is at most an hour or two off civil time rather than many."""
+    for value in (options.get("timezone"), options.get("location")):
+        if isinstance(value, dict):
+            value = value.get("timezone")
+        tz = _tz_from_name(value)
+        if tz is not None:
+            return tz
+    server_now = datetime.now().astimezone()
+    server_offset_h = (server_now.utcoffset() or timedelta(0)).total_seconds() / 3600.0
+    solar_h = round(lon / 15.0)
+    gap = ((server_offset_h - solar_h + 12.0) % 24.0) - 12.0
+    if abs(gap) <= 2.5:
+        return server_now.tzinfo or timezone.utc
+    return timezone(timedelta(hours=max(-12, min(14, solar_h))))
+
+
 def _when(option: str, now_local: datetime) -> datetime:
     """Resolve the 'when' option to a local datetime."""
     if option in ("now", "", None):
@@ -228,7 +265,9 @@ def fetch(
     except (TypeError, ValueError):
         maglim = 5.0
 
-    now_local = datetime.now().astimezone()
+    # Read the clock in the location's zone, not the server's: a Berlin
+    # server drawing Melbourne's "9 pm tonight" must mean 9 pm in Melbourne.
+    now_local = datetime.now(_location_tz(options, lon))
     when_local = _when(str(options.get("when") or "now"), now_local)
     when_utc = when_local.astimezone(timezone.utc)
     ut_hours = when_utc.hour + when_utc.minute / 60.0 + when_utc.second / 3600.0

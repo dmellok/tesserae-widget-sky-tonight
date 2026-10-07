@@ -1,7 +1,7 @@
 {
   "tesserae_compat": "1.x",
   "name": "Tonight's Sky",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "kind": "widget",
   "description": "An all-sky chart of what is actually above you right now: 5,000 stars, constellation figures, the planets and the Moon with its true phase. Computed on the spot from a built-in catalogue, so it needs no API key and makes no network call.",
   "icon": "ph-star-four",
